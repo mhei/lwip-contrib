@@ -143,6 +143,11 @@
 #define LWIP_HTTPD_STRNSTR_PRIVATE          1
 #endif
 
+/** Set this to 1 on platforms where strncasestr is not available */
+#ifndef LWIP_HTTPD_STRNCASESTR_PRIVATE
+#define LWIP_HTTPD_STRNCASESTR_PRIVATE      1
+#endif
+
 /** Set this to one to show error pages when parsing a request fails instead
     of simply closing the connection. */
 #ifndef LWIP_HTTPD_SUPPORT_EXTSTATUS
@@ -431,10 +436,12 @@ int g_iNumCGIs;
 static struct http_state *http_connections;
 #endif /* LWIP_HTTPD_KILL_OLD_ON_CONNECTIONS_EXCEEDED */
 
-#if LWIP_HTTPD_STRNSTR_PRIVATE
-/** Like strstr but does not need 'buffer' to be NULL-terminated */
+#if LWIP_HTTPD_STRNSTR_PRIVATE || LWIP_HTTPD_STRNCASESTR_PRIVATE
+/** Typedef to simplify the last argument type for following function */
+typedef int (*strncmp_func_t)(const char *s1, const char *s2, size_t n);
+
 static char*
-strnstr(const char* buffer, const char* token, size_t n)
+__lwip_strnxstr(const char* buffer, const char* token, size_t n, strncmp_func_t cmpfunc)
 {
   const char* p;
   int tokenlen = (int)strlen(token);
@@ -442,12 +449,30 @@ strnstr(const char* buffer, const char* token, size_t n)
     return (char *)buffer;
   }
   for (p = buffer; *p && (p + tokenlen <= buffer + n); p++) {
-    if ((*p == *token) && (strncmp(p, token, tokenlen) == 0)) {
+    if ((*p == *token) && (cmpfunc(p, token, tokenlen) == 0)) {
       return (char *)p;
     }
   }
   return NULL;
-} 
+}
+
+#if LWIP_HTTPD_STRNSTR_PRIVATE
+/** Like strstr but does not need 'buffer' to be NULL-terminated */
+static inline char*
+strnstr(const char* buffer, const char* token, size_t n)
+{
+  return __lwip_strnxstr(buffer, token, n, strncmp);
+}
+#endif /* LWIP_HTTPD_STRNSTR_PRIVATE */
+
+#if LWIP_HTTPD_STRNCASESTR_PRIVATE
+/** Like strcasestr but does not need 'buffer' to be NULL-terminated */
+static inline char*
+strncasestr(const char* buffer, const char* token, size_t n)
+{
+  return __lwip_strnxstr(buffer, token, n, strncasecmp);
+}
+#endif /* LWIP_HTTPD_STRNCASESTR_PRIVATE */
 #endif /* LWIP_HTTPD_STRNSTR_PRIVATE */
 
 #if LWIP_HTTPD_KILL_OLD_ON_CONNECTIONS_EXCEEDED
@@ -1753,7 +1778,7 @@ http_post_request(struct pbuf *inp, struct http_state *hs,
 #define HTTP_HDR_CONTENT_LEN                "Content-Length: "
 #define HTTP_HDR_CONTENT_LEN_LEN            16
 #define HTTP_HDR_CONTENT_LEN_DIGIT_MAX_LEN  10
-    char *scontent_len = strnstr(uri_end + 1, HTTP_HDR_CONTENT_LEN, crlfcrlf - (uri_end + 1));
+    char *scontent_len = strncasestr(uri_end + 1, HTTP_HDR_CONTENT_LEN, crlfcrlf - (uri_end + 1));
     if (scontent_len != NULL) {
       char *scontent_len_end = strnstr(scontent_len + HTTP_HDR_CONTENT_LEN_LEN, CRLF, HTTP_HDR_CONTENT_LEN_DIGIT_MAX_LEN);
       if (scontent_len_end != NULL) {
